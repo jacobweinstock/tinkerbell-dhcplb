@@ -1,4 +1,4 @@
-FROM golang:1.15
+FROM golang:1.15 as builder
 
 COPY . /code
 WORKDIR /code
@@ -6,4 +6,8 @@ RUN make
 
 EXPOSE 67
 
-ENTRYPOINT ["./pdhcp"]
+FROM alpine
+
+COPY --from=builder /code/pdhcp /pdhcp
+
+ENTRYPOINT ["/pdhcp"]

@@ -19,7 +19,7 @@ services:
     build:
       context: ./pdhcp
       dockerfile: Dockerfile
-    command: ["-i", "enp0s8", "-r", "localhost:6767", "-s", "192.168.2.111"]
+    command: ["-i", "${DHCP_RELAY_LISTEN_INTERFACE}", "-r", "localhost:6767", "-s", "${DHCP_RELAY_LISTEN_ADDRESS}"]
 
   cacher:
     build:
