@@ -1,0 +1,87 @@
+---
+services:
+  cacher:
+    build: .
+    network_mode: host
+    environment:
+      CACHER_FETCH_PER_PAGE: ${CACHER_FETCH_PER_PAGE}
+      FACILITY: ${FACILITY:-onprem}
+      PACKET_API_AUTH_TOKEN: ${PACKET_API_AUTH_TOKEN}
+      PACKET_API_URL: ${PACKET_API_URL:-https://lab-api.packet.net}
+      PACKET_CONSUMER_TOKEN: ${PACKET_CONSUMER_TOKEN}
+      PACKET_ENV: testing
+      PACKET_VERSION: 42
+      ROLLBAR_TOKEN: 42
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- 127.0.0.1:42112/_packet/healthcheck"]
+      interval: 5s
+      timeout: 2s
+      retries: 30
+    volumes:
+      - ./certs:/certs
+
+  cli:
+    build: cmd/cacherc
+    command: sleep 60d
+    network_mode: host
+    extra_hosts:
+      - "cacher:$BOOTS_HOST_IP"
+    environment:
+      FACILITY: ${FACILITY:-onprem}
+      CACHER_CERT_URL: http://cacher:42112/cert
+      CACHER_GRPC_AUTHORITY: cacher:42111
+
+  boots:
+    image: ${BOOTS_SERVER_IMAGE}
+    restart: unless-stopped
+    network_mode: host
+    command: -dhcp-addr 0.0.0.0:67 -tftp-addr $BOOTS_HOST_IP:69 -http-addr $BOOTS_HOST_IP:80 -log-level DEBUG
+    environment:
+      API_AUTH_TOKEN: ${PACKET_API_AUTH_TOKEN:-ignored}
+      API_CONSUMER_TOKEN: ${PACKET_CONSUMER_TOKEN:-ignored}
+      FACILITY_CODE: ${FACILITY:-onprem}
+      PACKET_ENV: ${PACKET_ENV:-testing}
+      PACKET_VERSION: ${PACKET_VERSION:-ignored}
+      ROLLBAR_TOKEN: ${ROLLBAR_TOKEN:-ignored}
+      ROLLBAR_DISABLE: ${ROLLBAR_DISABLE:-1}
+      MIRROR_HOST: ${BOOTS_HOST_IP:-127.0.0.1}:8080
+      #MIRROR_HOST: 192.168.2.111:8080
+      DNS_SERVERS: 8.8.8.8
+      PUBLIC_IP: $BOOTS_HOST_IP
+      BOOTP_BIND: $BOOTS_HOST_IP:67
+      HTTP_BIND: $BOOTS_HOST_IP:80
+      SYSLOG_BIND: $BOOTS_HOST_IP:514
+      TFTP_BIND: $BOOTS_HOST_IP:69
+      DOCKER_REGISTRY: $BOOTS_HOST_IP
+      REGISTRY_USERNAME: ${TINKERBELL_REGISTRY_USERNAME:-admin}
+      REGISTRY_PASSWORD: ${TINKERBELL_REGISTRY_PASSWORD:-Admin1234}
+      CACHER_GRPC_AUTHORITY: cacher:42111
+      CACHER_CERT_URL: http://cacher:42112/cert
+    extra_hosts:
+      - "cacher:$BOOTS_HOST_IP"
+    depends_on:
+      cacher:
+        condition: service_healthy
+
+  # OSIE work
+  osie-work:
+    image: alpine
+    entrypoint: /scripts/lastmile.sh
+    command: ["${OSIE_DOWNLOAD_URL}", "/source", "/source", "/destination"]
+    volumes:
+      - ${REPO_TOP_LEVEL:-.}/compose/osie:/scripts
+      - ${REPO_TOP_LEVEL:-.}/state/webroot/misc/osie/current:/source
+      - ${REPO_TOP_LEVEL:-.}/state/webroot/workflow:/destination
+
+  osie-bootloader:
+      image: nginx:alpine
+      restart: unless-stopped
+      tty: true
+      user: root
+      ports:
+        - 8080:80/tcp
+      volumes:
+        - ${REPO_TOP_LEVEL:-.}/state/webroot:/usr/share/nginx/html/
+      depends_on:
+        osie-work:
+          condition: service_completed_successfully

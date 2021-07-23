@@ -1,0 +1,241 @@
+services:
+  dhcplb:
+    restart: always
+    build:
+      context: ./dhcplb
+      dockerfile: Dockerfile
+    command: ["-config", "/config/config.json", "-overrides", "/config/overrides.json", "-v", "10"]
+    volumes: 
+      - ./dhcplb/:/config/
+    ports: 
+      - "6767:67/udp"
+    depends_on:
+      boots:
+        condition: service_started
+
+  dhcprelay:
+    restart: always
+    network_mode: host
+    build:
+      context: ./pdhcp
+      dockerfile: Dockerfile
+    command: ["-i", "enp0s8", "-r", "localhost:6767", "-s", "192.168.2.111"]
+
+  cacher:
+    build:
+      context: ./cacher
+    environment:
+      CACHER_FETCH_PER_PAGE: ${CACHER_FETCH_PER_PAGE}
+      FACILITY: ${FACILITY:-onprem}
+      PACKET_API_AUTH_TOKEN: ${PACKET_API_AUTH_TOKEN}
+      PACKET_API_URL: ${PACKET_API_URL:-https://lab-api.packet.net}
+      PACKET_CONSUMER_TOKEN: ${PACKET_CONSUMER_TOKEN}
+      PACKET_ENV: testing
+      PACKET_VERSION: 42
+      ROLLBAR_TOKEN: 42
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- 127.0.0.1:42112/_packet/healthcheck"]
+      interval: 5s
+      timeout: 2s
+      retries: 30
+    volumes:
+      - ./cacher/certs:/certs
+
+  legacy-cli:
+    build:
+      context: ./cacher/cmd/cacherc
+    command: sleep 60d
+    environment:
+      FACILITY: ${FACILITY:-onprem}
+      CACHER_CERT_URL: http://cacher:42112/cert
+      CACHER_GRPC_AUTHORITY: cacher:42111
+
+  legacy-boots:
+    image: ${BOOTS_SERVER_IMAGE}
+    restart: unless-stopped
+    command: -dhcp-addr 0.0.0.0:67 -tftp-addr $BOOTS_HOST_IP:69 -http-addr $BOOTS_HOST_IP:80 -log-level DEBUG
+    environment:
+      API_AUTH_TOKEN: ${PACKET_API_AUTH_TOKEN:-ignored}
+      API_CONSUMER_TOKEN: ${PACKET_CONSUMER_TOKEN:-ignored}
+      FACILITY_CODE: ${FACILITY:-onprem}
+      PACKET_ENV: ${PACKET_ENV:-testing}
+      PACKET_VERSION: ${PACKET_VERSION:-ignored}
+      ROLLBAR_TOKEN: ${ROLLBAR_TOKEN:-ignored}
+      ROLLBAR_DISABLE: ${ROLLBAR_DISABLE:-1}
+      MIRROR_HOST: ${BOOTS_HOST_IP:-127.0.0.1}:8080
+      #MIRROR_HOST: 192.168.2.111:8080
+      DNS_SERVERS: 8.8.8.8
+      PUBLIC_IP: $BOOTS_HOST_IP
+      BOOTP_BIND: $BOOTS_HOST_IP:67
+      HTTP_BIND: $BOOTS_HOST_IP:80
+      SYSLOG_BIND: $BOOTS_HOST_IP:514
+      TFTP_BIND: $BOOTS_HOST_IP:69
+      DOCKER_REGISTRY: $BOOTS_HOST_IP
+      REGISTRY_USERNAME: ${TINKERBELL_REGISTRY_USERNAME:-admin}
+      REGISTRY_PASSWORD: ${TINKERBELL_REGISTRY_PASSWORD:-Admin1234}
+      CACHER_GRPC_AUTHORITY: cacher:42111
+      CACHER_CERT_URL: http://cacher:42112/cert
+    depends_on:
+      cacher:
+        condition: service_healthy
+
+  # OSIE work
+  legacy-osie-work:
+    image: alpine
+    entrypoint: /scripts/lastmile.sh
+    command: ["${OSIE_DOWNLOAD_URL}", "/source", "/source", "/destination"]
+    volumes:
+      - ${LEGACY_REPO_TOP_LEVEL:-.}/compose/osie:/scripts
+      - ${LEGACY_REPO_TOP_LEVEL:-.}/state/webroot/misc/osie/current:/source
+      - ${LEGACY_REPO_TOP_LEVEL:-.}/state/webroot/workflow:/destination
+
+  legacy-osie-bootloader:
+      image: nginx:alpine
+      restart: unless-stopped
+      tty: true
+      user: root
+      ports:
+        - 8080:80/tcp
+      volumes:
+        - ${LEGACY_REPO_TOP_LEVEL:-.}/state/webroot:/usr/share/nginx/html/
+      depends_on:
+        legacy-osie-work:
+          condition: service_completed_successfully
+
+  # TLS cert for tink-server and docker registry
+  tink-tls-gen:
+    image: cfssl/cfssl
+    entrypoint: /code/tls/generate.sh
+    command: ["$TINKERBELL_HOST_IP"]
+    environment:
+      FACILITY: ${FACILITY:-onprem}
+    volumes:
+      - ${REPO_TOP_LEVEL:-.}:/code
+      - certs:/certs/${FACILITY:-onprem}:rw
+
+  tink-server:
+    image: ${TINK_SERVER_IMAGE}
+    restart: unless-stopped
+    environment:
+      FACILITY: ${FACILITY:-onprem}
+      PACKET_ENV: ${PACKET_ENV:-testing}
+      PACKET_VERSION: ${PACKET_VERSION:-ignored}
+      ROLLBAR_TOKEN: ${ROLLBAR_TOKEN:-ignored}
+      ROLLBAR_DISABLE: ${ROLLBAR_DISABLE:-1}
+      PGDATABASE: tinkerbell
+      PGHOST: tink-db
+      PGPASSWORD: tinkerbell
+      PGPORT: 5432
+      PGSSLMODE: disable
+      PGUSER: tinkerbell
+      TINKERBELL_GRPC_AUTHORITY: :42113
+      TINKERBELL_HTTP_AUTHORITY: :42114
+      TINK_AUTH_USERNAME: ${TINKERBELL_TINK_USERNAME:-admin}
+      TINK_AUTH_PASSWORD: ${TINKERBELL_TINK_PASSWORD:-admin}
+    depends_on:
+      tink-server-migration:
+        condition: service_started
+      tink-db:
+        condition: service_healthy
+      tink-tls-gen:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- 127.0.0.1:42114/cert"] # port needs to match TINKERBELL_HTTP_AUTHORITY
+      interval: 5s
+      timeout: 2s
+      retries: 30
+    volumes:
+      - certs:/certs/${FACILITY:-onprem}:rw
+    ports:
+      - 42113:42113/tcp
+      - 42114:42114/tcp
+
+  tink-server-migration:
+    image: ${TINK_SERVER_IMAGE}
+    restart: on-failure
+    environment:
+      ONLY_MIGRATION: "true"
+      FACILITY: ${FACILITY:-onprem}
+      PGDATABASE: tinkerbell
+      PGHOST: tink-db
+      PGPASSWORD: tinkerbell
+      PGPORT: 5432
+      PGSSLMODE: disable
+      PGUSER: tinkerbell
+      TINKERBELL_GRPC_AUTHORITY: :42113
+      TINKERBELL_HTTP_AUTHORITY: :42114
+      TINK_AUTH_USERNAME: ${TINKERBELL_TINK_USERNAME:-admin}
+      TINK_AUTH_PASSWORD: ${TINKERBELL_TINK_PASSWORD:-admin}
+    depends_on:
+      tink-db:
+        condition: service_healthy
+    volumes:
+      - certs:/certs/${FACILITY:-onprem}:rw
+
+  tink-db:
+    image: postgres:10-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tinkerbell
+      POSTGRES_PASSWORD: tinkerbell
+      POSTGRES_USER: tinkerbell
+    volumes:
+      - postgres_data:/var/lib/postgresql/data:rw
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tinkerbell"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  tink-cli:
+    image: ${TINK_CLI_IMAGE}
+    restart: unless-stopped
+    environment:
+      TINKERBELL_GRPC_AUTHORITY: tink-server:42113
+      TINKERBELL_CERT_URL: http://tink-server:42114/cert
+    depends_on:
+      tink-server:
+        condition: service_healthy
+      tink-db:
+        condition: service_healthy
+
+  boots:
+    image: ${BOOTS_SERVER_IMAGE}
+    restart: unless-stopped
+    command: -dhcp-addr 0.0.0.0:67 -tftp-addr $TINKERBELL_HOST_IP:69 -http-addr $TINKERBELL_HOST_IP:80 -log-level DEBUG
+    environment:
+      API_AUTH_TOKEN: ${PACKET_API_AUTH_TOKEN:-ignored}
+      API_CONSUMER_TOKEN: ${PACKET_CONSUMER_TOKEN:-ignored}
+      FACILITY_CODE: ${FACILITY:-onprem}
+      PACKET_ENV: ${PACKET_ENV:-testing}
+      PACKET_VERSION: ${PACKET_VERSION:-ignored}
+      ROLLBAR_TOKEN: ${ROLLBAR_TOKEN:-ignored}
+      ROLLBAR_DISABLE: ${ROLLBAR_DISABLE:-1}
+      MIRROR_HOST: ${TINKERBELL_HOST_IP:-127.0.0.1}:8080
+      DNS_SERVERS: 8.8.8.8
+      PUBLIC_IP: $TINKERBELL_HOST_IP
+      BOOTP_BIND: $TINKERBELL_HOST_IP:67
+      HTTP_BIND: $TINKERBELL_HOST_IP:80
+      SYSLOG_BIND: $TINKERBELL_HOST_IP:514
+      TFTP_BIND: $TINKERBELL_HOST_IP:69
+      DOCKER_REGISTRY: $TINKERBELL_HOST_IP
+      REGISTRY_USERNAME: ${TINKERBELL_REGISTRY_USERNAME:-admin}
+      REGISTRY_PASSWORD: ${TINKERBELL_REGISTRY_PASSWORD:-Admin1234}
+      TINKERBELL_GRPC_AUTHORITY: tink-server:42113
+      TINKERBELL_CERT_URL: http://tink-server:42114/cert
+      DATA_MODEL_VERSION: 1
+    #healthcheck:
+    #  test: ["CMD-SHELL", "wget -qO- 127.0.0.1/healthcheck"]
+    #  interval: 5s
+    #  timeout: 2s
+    #  retries: 30
+    depends_on:
+      tink-server:
+        condition: service_healthy
+
+  
+
+volumes:
+  postgres_data:
+  certs:
+  auth:

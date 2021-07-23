@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+option go_package = "lbc/api/v1";
+
+package lbc.api.v1;
+
+service Backend {
+    rpc Set (BackendRequest) returns (BackendResponse);
+}
+
+message BackendRequest {
+    string mac_address = 1;
+    string backend = 2;
+}
+
+message BackendResponse {
+    bool success = 1;
+}

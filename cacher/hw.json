@@ -1,0 +1,73 @@
+{
+  "allow_pxe": true,
+  "arch": "x86_64",
+  "efi_boot": false,
+  "facility_code": "onprem",
+  "id": "bb637a0e-24f6-4783-b123-547690e85748",
+  "instance": {},
+  "ip_addresses": [
+    {
+      "address": "192.168.2.157",
+      "gateway": "192.168.2.1",
+      "netmask": "255.255.255.0",
+      "address_family": 4,
+      "cidr": 24,
+      "enabled": true,
+      "management": true,
+      "network": "192.168.2.0",
+      "port": "eth0",
+      "public": false,
+      "type": "data"
+    }
+  ],
+  "management": {
+    "address": "192.168.2.157",
+    "gateway": "192.168.2.1",
+    "netmask": "255.255.255.0"
+  },
+  "manufacturer": {
+    "id": "5c6dc6d1-0b75-4e77-811e-e2d3b4e5312a",
+    "slug": "dell"
+  },
+  "name": "testserver",
+  "network_ports": [
+    {
+        "connected_ports": [
+          {
+            "data": { "eth0": null, "mac": null },
+            "hostname": "onprem-test",
+            "id": "683583be-4a07-419b-bc31-e099eea90d65",
+            "name": "xe-0/0/13",
+            "type": "data"
+          }
+        ],
+        "data": { "eth0": "null", "mac": "d2:9a:c5:cb:46:ea" },
+        "id": "fa90167a-48cc-4d2c-bc64-ff1b6a891a0f",
+        "name": "eth0",
+        "type": "data"
+      },
+      {
+        "connected_ports": [
+          {
+            "data": { "eth0": null, "mac": null },
+            "hostname": "msw1.a13.ewr1.packet.net",
+            "id": "5f991fed-9013-4624-981d-1c1ff20ddfa0",
+            "name": "ge-0/0/13",
+            "type": "data"
+          }
+        ],
+        "data": { "eth0": null, "mac": "d2:9a:c5:cb:46:ea" },
+        "id": "b0c128c3-ea86-42a2-b1cf-a479f2c0a1c6",
+        "name": "ipmi0",
+        "type": "ipmi"
+      }
+  ],
+  "plan_slug": "c1.xlarge.x86",
+  "plan_version_slug": "baremetal_3_05",
+  "preinstalled_operating_system_version": {},
+  "provisioner_engine": "packet",
+  "services": {},
+  "state": "provisionable",
+  "type": "server",
+  "vlan_id": null
+}

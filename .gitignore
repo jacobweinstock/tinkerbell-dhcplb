@@ -1,0 +1,5 @@
+state/webroot/misc/osie/current/*
+/state/webroot/workflow/*
+!/state/webroot/misc/osie/current/.keep
+!/state/webroot/workflow/.keep
+/state/webroot/*.gz

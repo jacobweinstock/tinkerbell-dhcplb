@@ -1,0 +1,5 @@
+# base configuration
+
+ENABLED=0
+PIDFILE="/var/run/pdhcp.pid"
+OPTIONS="-b /usr/share/pdhcp/local-backend.py -w 4 -f 'syslog(facility=local0)'"
